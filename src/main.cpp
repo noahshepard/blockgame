@@ -69,19 +69,79 @@ static uint32_t compile_shader(uint32_t type, const std::string& src) {
     return id; 
 }
 
+static int check_program_err(uint32_t prog, int32_t status, const std::string& title) {
+    int res; 
+
+    glGetProgramiv(prog, status, &res); 
+    if (res == GL_FALSE) {
+        int len; 
+        glGetProgramiv(prog, GL_INFO_LOG_LENGTH,  &len); 
+        char* msg = (char*)alloca(len * sizeof(char)); 
+        glGetProgramInfoLog(prog, len, &len, msg); 
+        std::cerr << title << std::endl; 
+        std::cerr << msg << std::endl; 
+
+        glDeleteProgram(prog);
+
+        return -1;  
+    }
+    return 0; 
+}
+
 static uint32_t create_shader(const std::string& vertex_shader, const std::string& fragment_shader) {
     uint32_t prog = glCreateProgram();
     uint32_t vs = compile_shader(GL_VERTEX_SHADER, vertex_shader); 
+    if (!vs) {
+        glDeleteProgram(prog); 
+        return 0; 
+    }
     uint32_t fs = compile_shader(GL_FRAGMENT_SHADER, fragment_shader); 
+    if (!fs) {
+        glDeleteShader(vs); 
+        glDeleteProgram(prog); 
+        return 0; 
+    }
+    
 
     glAttachShader(prog, vs); 
+    uint32_t err = glGetError();
+    if (err != GL_NO_ERROR) {
+        std::cerr << "attatching vertex shader failed" << std::endl; 
+        glDeleteShader(vs); 
+        glDeleteShader(fs); 
+        glDeleteProgram(prog);
+        return 0; 
+    }
+
     glAttachShader(prog, fs);
-    glLinkProgram(prog); 
-    glValidateProgram(prog); 
+    err = glGetError();
+    if (err != GL_NO_ERROR) {
+        std::cerr << "attatching fragment shader failed" << std::endl; 
+        glDeleteShader(vs); 
+        glDeleteShader(fs); 
+        glDeleteProgram(prog);
+        return 0; 
+    }
+
+    int res; 
+
+    glLinkProgram(prog);
+    if (check_program_err(prog, GL_LINK_STATUS, "program linking failed") == -1) {
+        glDeleteShader(vs); 
+        glDeleteShader(fs); 
+        return 0; 
+    }
+    
+    glValidateProgram(prog);
+
+    if (check_program_err(prog, GL_VALIDATE_STATUS, "program linking failed") == -1) {
+        glDeleteShader(vs); 
+        glDeleteShader(fs); 
+        return 0; 
+    }
 
     glDeleteShader(vs); 
     glDeleteShader(fs); 
-
     return prog; 
 } 
 
@@ -120,10 +180,16 @@ int main(int argc, char* argv[]) {
           << glGetString(GL_VERSION)
           << std::endl;
 
-    float positions[6] = {
+    float positions[] = {
         -0.5f, -0.5f, 
-        0.0f, 0.5f, 
-        0.5f, -0.5f
+        0.5f, -0.5f, 
+        0.5f, 0.5f, 
+        -0.5f, 0.5f
+    };
+
+    uint32_t indices[] {
+        0, 1, 2, 
+        2, 3, 0
     };
 
     uint32_t vao;
@@ -134,12 +200,18 @@ int main(int argc, char* argv[]) {
     uint32_t buff; 
     glGenBuffers(1, &buff); 
     glBindBuffer(GL_ARRAY_BUFFER, buff); 
-    glBufferData(GL_ARRAY_BUFFER, 6 * sizeof(float), positions, GL_STATIC_DRAW);
+    glBufferData(GL_ARRAY_BUFFER, 8 * sizeof(float), positions, GL_STATIC_DRAW);
 
     glEnableVertexAttribArray(0); 
     glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 2 * sizeof(float), 0);  
 
+    uint32_t ibo; 
+    glGenBuffers(1, &ibo); 
+    glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, ibo); 
+    glBufferData(GL_ELEMENT_ARRAY_BUFFER, 6 * sizeof(uint32_t), indices, GL_STATIC_DRAW);
+
     shader_prog_src src = parse_shader(shader_path);
+    std::cout << src.vertex_src << src.fragment_src << std::endl; 
     uint32_t shader = create_shader(src.vertex_src, src.fragment_src); 
     glUseProgram(shader); 
 
@@ -153,7 +225,7 @@ int main(int argc, char* argv[]) {
         glClearColor(0.1f, 0.1f, 0.15f, 1.0f); 
         glClear(GL_COLOR_BUFFER_BIT); 
 
-        glDrawArrays(GL_TRIANGLES, 0, 3); 
+        glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_INT, nullptr); 
 
         glfwSwapBuffers(window); 
         glfwPollEvents(); 
